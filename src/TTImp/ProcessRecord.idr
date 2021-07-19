@@ -10,7 +10,7 @@ import Core.UnifyState
 import Core.Value
 
 import TTImp.BindImplicits
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.Elab.Check
 import TTImp.TTImp
 import TTImp.Unelab

@@ -10,7 +10,7 @@ import Core.Reflect
 import Core.UnifyState
 import Core.Value
 
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.Elab.Check
 import TTImp.Elab.RunElab
 import TTImp.TTImp
@@ -22,9 +22,9 @@ processRunElab : {vars : _} ->
                  {auto c : Ref Ctxt Defs} ->
                  {auto m : Ref MD Metadata} ->
                  {auto u : Ref UST UState} ->
-                 List ElabOpt -> NestedNames vars -> Env Term vars -> FC ->
+                 Elaborator -> NestedNames vars -> Env Term vars -> FC ->
                  RawImp -> Core ()
-processRunElab eopts nest env fc tm
+processRunElab elab nest env fc tm
     = do defs <- get Ctxt
          unless (isExtension ElabReflection defs) $
              throw (GenericMsg fc "%language ElabReflection not enabled")
@@ -33,5 +33,5 @@ processRunElab eopts nest env fc tm
          unit <- getCon fc defs (builtin "Unit")
          exp <- appCon fc defs n [unit]
 
-         stm <- checkTerm tidx InExpr eopts nest env tm (gnf env exp)
+         stm <- checkTerm tidx InExpr elab nest env tm (gnf env exp)
          ignore $ elabScript fc nest env !(nfOpts withAll defs env stm) Nothing

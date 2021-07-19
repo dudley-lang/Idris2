@@ -14,7 +14,7 @@ import Core.Value
 import TTImp.BindImplicits
 import TTImp.Elab.Check
 import TTImp.Elab.Utils
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.TTImp
 import TTImp.Utils
 
@@ -181,13 +181,15 @@ processFnOpt fc _ ndef (SpecArgs ns)
 getFnString : {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
+              Elaborator ->
               RawImp -> Core String
-getFnString (IPrimVal _ (Str st)) = pure st
-getFnString tm
+              --JE TODO: should have empty opts, need default elab?
+getFnString elab (IPrimVal _ (Str st)) = pure st
+getFnString elab tm
     = do inidx <- resolveName (UN "[foreign]")
          let fc = getFC tm
          let gstr = gnf [] (PrimVal fc StringType)
-         etm <- checkTerm inidx InExpr [] (MkNested []) [] tm gstr
+         etm <- checkTerm inidx InExpr elab (MkNested []) [] tm gstr
          defs <- get Ctxt
          case !(nf defs [] etm) of
               NPrimVal fc (Str st) => pure st
@@ -201,6 +203,7 @@ initDef : {vars : _} ->
           {auto c : Ref Ctxt Defs} ->
           {auto m : Ref MD Metadata} ->
           {auto u : Ref UST UState} ->
+          Elaborator ->
           Name -> Env Term vars -> Term vars -> List FnOpt -> Core Def
 initDef n env ty []
     = do addUserHole False n
@@ -212,7 +215,7 @@ initDef n env ty (ExternFn :: opts)
 initDef n env ty (ForeignFn cs :: opts)
     = do defs <- get Ctxt
          a <- getArity defs env ty
-         cs' <- traverse getFnString cs
+         cs' <- traverse (getFnString elab) cs
          pure (ForeignDef a cs')
 initDef n env ty (_ :: opts) = initDef n env ty opts
 
@@ -259,10 +262,10 @@ processType : {vars : _} ->
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
-              List ElabOpt -> NestedNames vars -> Env Term vars ->
+              Elaborator -> NestedNames vars -> Env Term vars ->
               FC -> RigCount -> Visibility ->
               List FnOpt -> ImpTy -> Core ()
-processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc nameFC n_in ty_raw)
+processType {vars} elab nest env fc rig vis opts (MkImpTy tfc nameFC n_in ty_raw)
     = do n <- inCurrentNS n_in
 
          addNameLoc nameFC n
@@ -275,15 +278,15 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc nameFC n_in ty_ra
          defs <- get Ctxt
          Nothing <- lookupCtxtExact (Resolved idx) (gamma defs)
               | Just gdef => throw (AlreadyDefined fc n)
-
+         let extElab = record {eopts = HolesOkay :: eopts elab} elab
          ty <-
-             wrapErrorC eopts (InType fc n) $
-                   checkTerm idx InType (HolesOkay :: eopts) nest env
+             wrapErrorC (eopts elab) (InType fc n) $
+                   checkTerm idx InType extElab nest env
                              (IBindHere fc (PI erased) ty_raw)
                              (gType fc)
          logTermNF "declare.type" 3 ("Type of " ++ show n) [] (abstractFullEnvType tfc env ty)
 
-         def <- initDef n env ty opts
+         def <- initDef elab n env ty opts
          let fullty = abstractFullEnvType tfc env ty
 
          (erased, dterased) <- findErased fullty
@@ -300,7 +303,7 @@ processType {vars} eopts nest env fc rig vis opts (MkImpTy tfc nameFC n_in ty_ra
          -- from the top level.
          -- But, if it's a case block, it'll be checked as part of the top
          -- level check so don't set the flag.
-         unless (InCase `elem` eopts) $ setLinearCheck idx True
+         unless (InCase `elem` eopts elab) $ setLinearCheck idx True
 
          log "declare.type" 2 $ "Setting options for " ++ show n ++ ": " ++ show opts
          let name = Resolved idx
