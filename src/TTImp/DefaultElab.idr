@@ -1,4 +1,4 @@
-module TTImp.Elab
+module TTImp.DefaultElab
 
 import Core.Context
 import Core.Context.Log

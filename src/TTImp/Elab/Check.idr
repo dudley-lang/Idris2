@@ -49,7 +49,6 @@ data ElabOpt
 
 public export
 ElabSubFun : Type
-ElabFun : Type
 
 ElabSubFun = {inner, vars : _} ->
               {auto c : Ref Ctxt Defs} ->
@@ -61,6 +60,8 @@ ElabSubFun = {inner, vars : _} ->
               RawImp -> Maybe (Glued vars) ->
               Core (Term vars, Glued vars)
 
+public export
+ElabFun : Type
 ElabFun =  {vars : _} ->
            {auto c : Ref Ctxt Defs} ->
            {auto m : Ref MD Metadata} ->
