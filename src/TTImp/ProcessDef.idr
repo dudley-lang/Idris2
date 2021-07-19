@@ -315,13 +315,13 @@ checkLHS : {vars : _} ->
            {auto u : Ref UST UState} ->
            Bool -> -- in transform
            (mult : RigCount) -> (hashit : Bool) ->
-           Int -> List ElabOpt -> NestedNames vars -> Env Term vars ->
+           Int -> Elaborator -> NestedNames vars -> Env Term vars ->
            FC -> RawImp ->
            Core (RawImp, -- checked LHS with implicits added
                  (vars' ** (SubVars vars vars',
                            Env Term vars', NestedNames vars',
                            Term vars', Term vars')))
-checkLHS {vars} trans mult hashit n opts nest env fc lhs_in
+checkLHS {vars} trans mult hashit n elab nest env fc lhs_in
     = do defs <- get Ctxt
          logRaw "declare.def.lhs" 30 "Raw LHS: " lhs_in
          lhs_raw <- if trans
@@ -349,7 +349,7 @@ checkLHS {vars} trans mult hashit n opts nest env fc lhs_in
                           else InLHS mult
          (lhstm, lhstyg) <-
              wrapErrorC opts (InLHS fc !(getFullName (Resolved n))) $
-                     elabTerm n lhsMode opts nest env
+                     elabTerm elab n lhsMode nest env
                                 (IBindHere fc PATTERN lhs) Nothing
          logTerm "declare.def.lhs" 5 "Checked LHS term" lhstm
          lhsty <- getTerm lhstyg
@@ -411,9 +411,9 @@ checkClause : {vars : _} ->
               {auto u : Ref UST UState} ->
               (mult : RigCount) -> (vis : Visibility) ->
               (totreq : TotalReq) -> (hashit : Bool) ->
-              Int -> List ElabOpt -> NestedNames vars -> Env Term vars ->
+              Int -> Elaborator -> NestedNames vars -> Env Term vars ->
               ImpClause -> Core (Either RawImp Clause)
-checkClause mult vis totreq hashit n opts nest env (ImpossibleClause fc lhs)
+checkClause mult vis totreq hashit n elab nest env (ImpossibleClause fc lhs)
     = do lhs_raw <- lhsInCurrentNS nest lhs
          handleUnify
            (do autoimp <- isUnboundImplicits
@@ -424,7 +424,7 @@ checkClause mult vis totreq hashit n opts nest env (ImpossibleClause fc lhs)
                log "declare.def.clause.impossible" 5 $ "Checking " ++ show lhs
                logEnv "declare.def.clause.impossible" 5 "In env" env
                (lhstm, lhstyg) <-
-                           elabTerm n (InLHS mult) opts nest env
+                           elabTerm elab n (InLHS mult) nest env
                                       (IBindHere fc PATTERN lhs) Nothing
                defs <- get Ctxt
                lhs <- normaliseHoles defs env lhstm
@@ -438,16 +438,16 @@ checkClause mult vis totreq hashit n opts nest env (ImpossibleClause fc lhs)
                            if !(impossibleErrOK defs err)
                               then pure (Left lhs_raw)
                               else throw (ValidCase fc env (Right err)))
-checkClause {vars} mult vis totreq hashit n opts nest env (PatClause fc lhs_in rhs)
+checkClause {vars} mult vis totreq hashit n elab nest env (PatClause fc lhs_in rhs)
     = do (_, (vars'  ** (sub', env', nest', lhstm', lhsty'))) <-
-             checkLHS False mult hashit n opts nest env fc lhs_in
+             checkLHS False mult hashit n elab nest env fc lhs_in
          let rhsMode = if isErased mult then InType else InExpr
          log "declare.def.clause" 5 $ "Checking RHS " ++ show rhs
          logEnv "declare.def.clause" 5 "In env" env'
 
          rhstm <- logTime ("+++ Check RHS " ++ show fc) $
-                    wrapErrorC opts (InRHS fc !(getFullName (Resolved n))) $
-                       checkTermSub n rhsMode opts nest' env' env sub' rhs (gnf env' lhsty')
+                    wrapErrorC (eopts elab) (InRHS fc !(getFullName (Resolved n))) $
+                       checkTermSub n rhsMode elab nest' env' env sub' rhs (gnf env' lhsty')
          clearHoleLHS
 
          logTerm "declare.def.clause" 3 "RHS term" rhstm
@@ -849,9 +849,9 @@ processDef : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto m : Ref MD Metadata} ->
              {auto u : Ref UST UState} ->
-             List ElabOpt -> NestedNames vars -> Env Term vars -> FC ->
+             Elaborator -> NestedNames vars -> Env Term vars -> FC ->
              Name -> List ImpClause -> Core ()
-processDef opts nest env fc n_in cs_in
+processDef elab nest env fc n_in cs_in
     = do n <- inCurrentNS n_in
          defs <- get Ctxt
          Just gdef <- lookupCtxtExact n (gamma defs)
@@ -871,7 +871,7 @@ processDef opts nest env fc n_in cs_in
          let treq = fromMaybe !getDefaultTotalityOption (findSetTotal (flags gdef))
          cs <- withTotality treq $
                traverse (checkClause mult (visibility gdef) treq
-                                     hashit nidx opts nest env) cs_in
+                                     hashit nidx elab nest env) cs_in
 
          let pats = map toPats (rights cs)
 
@@ -910,7 +910,7 @@ processDef opts nest env fc n_in cs_in
          put Ctxt (record { toCompileCase $= (n ::) } defs)
 
          atotal <- toResolvedNames (NS builtinNS (UN "assert_total"))
-         when (not (InCase `elem` opts)) $
+         when (not (InCase `elem` (eopts elab))) $
              do calcRefs False atotal (Resolved nidx)
                 sc <- calculateSizeChange fc n
                 setSizeChange fc n sc
@@ -918,13 +918,13 @@ processDef opts nest env fc n_in cs_in
 
          md <- get MD -- don't need the metadata collected on the coverage check
 
-         cov <- logTime ("+++ Checking Coverage " ++ show n) $ checkCoverage nidx ty mult cs
+         cov <- logTime ("+++ Checking Coverage " ++ show n) $ checkCoverage elab nidx ty mult cs
          setCovering fc n cov
          put MD md
 
          -- If we're not in a case tree, compile all the outstanding case
          -- trees.
-         when (not (elem InCase opts)) $
+         when (not (elem InCase (eopts elab))) $
               compileRunTime fc atotal
   where
     -- Move `withTotality` to Core.Context if we need it elsewhere
@@ -955,9 +955,11 @@ processDef opts nest env fc n_in cs_in
     -- Return 'Nothing' if the clause is impossible, otherwise return the
     -- checked clause (with implicits filled in, so that we can see if they
     -- match any of the given clauses)
-    checkImpossible : Int -> RigCount -> ClosedTerm ->
+    -- JE TODO: Had [] for options, how do we ensure that? replace in elab?
+    -- Or should this use the default elaborator regardless?
+    checkImpossible : Elaborator -> Int -> RigCount -> ClosedTerm ->
                       Core (Maybe ClosedTerm)
-    checkImpossible n mult tm
+    checkImpossible elab n mult tm
         = do itm <- unelabNoPatvars [] tm
              handleUnify
                (do ctxt <- get Ctxt
@@ -966,7 +968,7 @@ processDef opts nest env fc n_in cs_in
                    setUnboundImplicits True
                    (_, lhstm) <- bindNames False itm
                    setUnboundImplicits autoimp
-                   (lhstm, _) <- elabTerm n (InLHS mult) [] (MkNested []) []
+                   (lhstm, _) <- elabTerm elab n (InLHS mult) (MkNested []) []
                                     (IBindHere fc PATTERN lhstm) Nothing
                    defs <- get Ctxt
                    lhs <- normaliseHoles defs [] lhstm
@@ -998,10 +1000,10 @@ processDef opts nest env fc n_in cs_in
                           pure Nothing)
     getClause (Right c) = pure (Just c)
 
-    checkCoverage : Int -> ClosedTerm -> RigCount ->
+    checkCoverage : Elaborator -> Int -> ClosedTerm -> RigCount ->
                     List (Either RawImp Clause) ->
                     Core Covering
-    checkCoverage n ty mult cs
+    checkCoverage elab n ty mult cs
         = do covcs' <- traverse getClause cs -- Make stand in LHS for impossible clauses
              log "declare.def" 5 $ unlines
                $ "Using clauses :"
@@ -1020,7 +1022,7 @@ processDef opts nest env fc n_in cs_in
                                  show !(getFullName (Resolved n)) ++ ":\n" ++
                                 showSep "\n" (map show mc))
              -- Filter out the ones which are impossible
-             missImp <- traverse (checkImpossible n mult) missCase
+             missImp <- traverse (checkImpossible elab n mult) missCase
              -- Filter out the ones which are actually matched (perhaps having
              -- come up due to some overlapping patterns)
              missMatch <- traverse (checkMatched covcs) (mapMaybe id missImp)

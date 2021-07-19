@@ -38,12 +38,117 @@ Show ElabMode where
   show InExpr = "InExpr"
   show InTransform = "InTransform"
 
+
+
 public export
 data ElabOpt
   = HolesOkay
   | InCase
   | InPartialEval
   | InTrans
+
+public export
+ElabSubFun : Type
+ElabFun : Type
+
+ElabSubFun = {inner, vars : _} ->
+              {auto c : Ref Ctxt Defs} ->
+              {auto m : Ref MD Metadata} ->
+              {auto u : Ref UST UState} ->
+              Int -> ElabMode ->
+              NestedNames vars -> Env Term vars ->
+              Env Term inner -> SubVars inner vars ->
+              RawImp -> Maybe (Glued vars) ->
+              Core (Term vars, Glued vars)
+
+ElabFun =  {vars : _} ->
+           {auto c : Ref Ctxt Defs} ->
+           {auto m : Ref MD Metadata} ->
+           {auto u : Ref UST UState} ->
+           Int -> ElabMode ->
+           NestedNames vars -> Env Term vars ->
+           RawImp -> Maybe (Glued vars) ->
+           Core (Term vars, Glued vars)
+
+public export
+record Elaborator where
+  constructor MkElab
+  eopts : List ElabOpt
+  elabFun : List ElabOpt -> ElabSubFun
+
+
+public export
+elabTerm : Elaborator -> ElabFun
+elabTerm elaborator defining mode nest env tm ty = elabFun elaborator (eopts elaborator) defining mode nest env env SubRefl tm ty
+
+
+
+export
+checkTermSub : {inner, vars : _} ->
+               {auto c : Ref Ctxt Defs} ->
+               {auto m : Ref MD Metadata} ->
+               {auto u : Ref UST UState} ->
+               Int -> ElabMode -> Elaborator ->
+               NestedNames vars -> Env Term vars ->
+               Env Term inner -> SubVars inner vars ->
+               RawImp -> Glued vars ->
+               Core (Term vars)
+checkTermSub defining mode elab nest env env' sub tm ty
+    = do defs <- case mode of
+                      InType => branch -- might need to backtrack if there's
+                                       -- a case in the type
+                      _ => get Ctxt
+         ust <- get UST
+         mv <- get MD
+         res <-
+            catch {t = Error}
+                  (elabFun elab (eopts elab) defining mode nest
+                               env env' sub tm (Just ty))
+                  \case
+                    TryWithImplicits loc benv ns
+                      => do put Ctxt defs
+                            put UST ust
+                            put MD mv
+                            tm' <- bindImps loc benv ns tm
+                            elabFun elab (eopts elab) defining mode nest
+                                        env env' sub
+                                        tm' (Just ty)
+                    err => throw err
+         case mode of
+              InType => commit -- bracket the 'branch' above
+              _ => pure ()
+
+         pure (fst res)
+  where
+    bindImps' : {vs : _} ->
+                FC -> Env Term vs -> List (Name, Term vs) -> RawImp ->
+                Core RawImp
+    bindImps' loc env [] ty = pure ty
+    bindImps' loc env ((n, ty) :: ntys) sc
+        = pure $ IPi loc erased Implicit (Just n)
+                     (Implicit loc True) !(bindImps' loc env ntys sc)
+
+    bindImps : {vs : _} ->
+               FC -> Env Term vs -> List (Name, Term vs) -> RawImp ->
+               Core RawImp
+    bindImps loc env ns (IBindHere fc m ty)
+        = pure $ IBindHere fc m !(bindImps' loc env ns ty)
+    bindImps loc env ns ty = bindImps' loc env ns ty
+
+
+
+export
+checkTerm : {vars : _} ->
+            {auto c : Ref Ctxt Defs} ->
+            {auto m : Ref MD Metadata} ->
+            {auto u : Ref UST UState} ->
+            Int -> ElabMode -> Elaborator ->
+            NestedNames vars -> Env Term vars ->
+            RawImp -> Glued vars ->
+            Core (Term vars)
+checkTerm defining mode elab nest env tm ty
+    = checkTermSub defining mode elab nest env env SubRefl tm ty
+
 
 public export
 Eq ElabOpt where

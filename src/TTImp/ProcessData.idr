@@ -15,7 +15,7 @@ import Core.Value
 import TTImp.BindImplicits
 import TTImp.Elab.Check
 import TTImp.Elab.Utils
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.TTImp
 import TTImp.Utils
 
@@ -341,10 +341,10 @@ processData : {vars : _} ->
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
-              List ElabOpt -> NestedNames vars ->
+              Elaborator -> NestedNames vars ->
               Env Term vars -> FC -> Visibility ->
               ImpData -> Core ()
-processData {vars} eopts nest env fc vis (MkImpLater dfc n_in ty_raw)
+processData {vars} elab nest env fc vis (MkImpLater dfc n_in ty_raw)
     = do n <- inCurrentNS n_in
          ty_raw <- bindTypeNames fc [] vars ty_raw
 
@@ -354,8 +354,8 @@ processData {vars} eopts nest env fc vis (MkImpLater dfc n_in ty_raw)
              | Just gdef => throw (AlreadyDefined fc n)
 
          (ty, _) <-
-             wrapErrorC eopts (InCon fc n) $
-                    elabTerm !(resolveName n) InType eopts nest env
+             wrapErrorC (eopts elab) (InCon fc n) $
+                    elabTerm elab !(resolveName n) InType nest env
                               (IBindHere fc (PI erased) ty_raw)
                               (Just (gType dfc))
          let fullty = abstractEnvType dfc env ty
@@ -380,15 +380,15 @@ processData {vars} eopts nest env fc vis (MkImpLater dfc n_in ty_raw)
               _ => do addHashWithNames n
                       addHashWithNames fullty
 
-processData {vars} eopts nest env fc vis (MkImpData dfc n_in ty_raw opts cons_raw)
+processData {vars} elab nest env fc vis (MkImpData dfc n_in ty_raw opts cons_raw)
     = do n <- inCurrentNS n_in
          ty_raw <- bindTypeNames fc [] vars ty_raw
 
          log "declare.data" 1 $ "Processing " ++ show n
          defs <- get Ctxt
          (ty, _) <-
-             wrapErrorC eopts (InCon fc n) $
-                    elabTerm !(resolveName n) InType eopts nest env
+             wrapErrorC (eopts elab) (InCon fc n) $
+                    elabTerm elab !(resolveName n) InType nest env
                               (IBindHere fc (PI erased) ty_raw)
                               (Just (gType dfc))
          let fullty = abstractEnvType dfc env ty
@@ -427,7 +427,7 @@ processData {vars} eopts nest env fc vis (MkImpData dfc n_in ty_raw opts cons_ra
          -- Constructors are private if the data type as a whole is
          -- export
          let cvis = if vis == Export then Private else vis
-         cons <- traverse (checkCon eopts nest env cvis n_in (Resolved tidx)) cons_raw
+         cons <- traverse (checkCon (eopts elab) nest env cvis n_in (Resolved tidx)) cons_raw
 
          let ddef = MkData (MkCon dfc n arity fullty) cons
          ignore $ addData vars vis tidx ddef

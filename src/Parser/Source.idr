@@ -19,7 +19,7 @@ runParserTo : {e : _} ->
               Maybe LiterateStyle -> Lexer ->
               String -> Grammar SemanticDecorations Token e ty -> Either Error (SemanticDecorations, ty)
 runParserTo origin lit reject str p
-    = do str    <- mapFst (fromLitError origin) $ unlit lit str
+    = do str    <- mapFst (fromLitError origin) $ unlit lit str 
          toks   <- mapFst (fromLexError origin) $ lexTo reject str
          (decs, (parsed, _)) <- mapFst (fromParsingErrors origin) $ parseWith p toks
          Right (decs, parsed)
@@ -28,7 +28,7 @@ export
 runParser : {e : _} ->
             (origin : OriginDesc) -> Maybe LiterateStyle -> String ->
             Grammar SemanticDecorations Token e ty -> Either Error (SemanticDecorations, ty)
-runParser origin lit = runParserTo origin lit (pred $ const False)
+runParser origin lit = runParserTo origin lit (pred $ const False) 
 
 export covering
 parseFile : (fname : String)

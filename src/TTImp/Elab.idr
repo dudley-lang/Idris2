@@ -90,16 +90,17 @@ addHoleToSave n
          traverse_ addToSave ms
 
 export
-elabTermSub : {inner, vars : _} ->
+elabTermSub : List ElabOpt ->
+              {inner, vars : _} ->
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
-              Int -> ElabMode -> List ElabOpt ->
+              Int -> ElabMode ->
               NestedNames vars -> Env Term vars ->
               Env Term inner -> SubVars inner vars ->
               RawImp -> Maybe (Glued vars) ->
               Core (Term vars, Glued vars)
-elabTermSub {vars} defining mode opts nest env env' sub tm ty
+elabTermSub opts {vars} defining mode nest env env' sub tm ty
     = do let incase = elem InCase opts
          let inPE = elem InPartialEval opts
          let inTrans = elem InTrans opts
@@ -208,78 +209,10 @@ elabTermSub {vars} defining mode opts nest env env' sub tm ty
                Nothing => addHoles acc allhs hs
                Just _ => addHoles (insert n x acc) allhs hs
 
-export
-elabTerm : {vars : _} ->
-           {auto c : Ref Ctxt Defs} ->
-           {auto m : Ref MD Metadata} ->
-           {auto u : Ref UST UState} ->
-           Int -> ElabMode -> List ElabOpt ->
-           NestedNames vars -> Env Term vars ->
-           RawImp -> Maybe (Glued vars) ->
-           Core (Term vars, Glued vars)
-elabTerm defining mode opts nest env tm ty
-    = elabTermSub defining mode opts nest env env SubRefl tm ty
 
-export
-checkTermSub : {inner, vars : _} ->
-               {auto c : Ref Ctxt Defs} ->
-               {auto m : Ref MD Metadata} ->
-               {auto u : Ref UST UState} ->
-               Int -> ElabMode -> List ElabOpt ->
-               NestedNames vars -> Env Term vars ->
-               Env Term inner -> SubVars inner vars ->
-               RawImp -> Glued vars ->
-               Core (Term vars)
-checkTermSub defining mode opts nest env env' sub tm ty
-    = do defs <- case mode of
-                      InType => branch -- might need to backtrack if there's
-                                       -- a case in the type
-                      _ => get Ctxt
-         ust <- get UST
-         mv <- get MD
-         res <-
-            catch {t = Error}
-                  (elabTermSub defining mode opts nest
-                               env env' sub tm (Just ty))
-                  \case
-                    TryWithImplicits loc benv ns
-                      => do put Ctxt defs
-                            put UST ust
-                            put MD mv
-                            tm' <- bindImps loc benv ns tm
-                            elabTermSub defining mode opts nest
-                                        env env' sub
-                                        tm' (Just ty)
-                    err => throw err
-         case mode of
-              InType => commit -- bracket the 'branch' above
-              _ => pure ()
 
-         pure (fst res)
-  where
-    bindImps' : {vs : _} ->
-                FC -> Env Term vs -> List (Name, Term vs) -> RawImp ->
-                Core RawImp
-    bindImps' loc env [] ty = pure ty
-    bindImps' loc env ((n, ty) :: ntys) sc
-        = pure $ IPi loc erased Implicit (Just n)
-                     (Implicit loc True) !(bindImps' loc env ntys sc)
+public export
+defaultElab : List ElabOpt -> Elaborator
+defaultElab eopts = MkElab eopts elabTermSub
 
-    bindImps : {vs : _} ->
-               FC -> Env Term vs -> List (Name, Term vs) -> RawImp ->
-               Core RawImp
-    bindImps loc env ns (IBindHere fc m ty)
-        = pure $ IBindHere fc m !(bindImps' loc env ns ty)
-    bindImps loc env ns ty = bindImps' loc env ns ty
 
-export
-checkTerm : {vars : _} ->
-            {auto c : Ref Ctxt Defs} ->
-            {auto m : Ref MD Metadata} ->
-            {auto u : Ref UST UState} ->
-            Int -> ElabMode -> List ElabOpt ->
-            NestedNames vars -> Env Term vars ->
-            RawImp -> Glued vars ->
-            Core (Term vars)
-checkTerm defining mode opts nest env tm ty
-    = checkTermSub defining mode opts nest env env SubRefl tm ty
