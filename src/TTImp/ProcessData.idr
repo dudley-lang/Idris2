@@ -83,10 +83,10 @@ checkCon : {vars : _} ->
            {auto c : Ref Ctxt Defs} ->
            {auto m : Ref MD Metadata} ->
            {auto u : Ref UST UState} ->
-           List ElabOpt -> NestedNames vars ->
+           Elaborator -> NestedNames vars ->
            Env Term vars -> Visibility -> (orig : Name) -> (resolved : Name) ->
            ImpTy -> Core Constructor
-checkCon {vars} opts nest env vis tn_in tn (MkImpTy fc _ cn_in ty_raw)
+checkCon {vars} elab nest env vis tn_in tn (MkImpTy fc _ cn_in ty_raw)
     = do cn <- inCurrentNS cn_in
          let ty_raw = updateNS tn_in tn ty_raw
          log "declare.data.constructor" 5 $ "Checking constructor type " ++ show cn ++ " : " ++ show ty_raw
@@ -97,8 +97,8 @@ checkCon {vars} opts nest env vis tn_in tn (MkImpTy fc _ cn_in ty_raw)
          Nothing <- lookupCtxtExact cn (gamma defs)
              | Just gdef => throw (AlreadyDefined fc cn)
          ty <-
-             wrapErrorC opts (InCon fc cn) $
-                   checkTerm !(resolveName cn) InType opts nest env
+             wrapErrorC (eopts elab) (InCon fc cn) $
+                   checkTerm !(resolveName cn) InType elab nest env
                               (IBindHere fc (PI erased) ty_raw)
                               (gType fc)
 
@@ -427,7 +427,7 @@ processData {vars} elab nest env fc vis (MkImpData dfc n_in ty_raw opts cons_raw
          -- Constructors are private if the data type as a whole is
          -- export
          let cvis = if vis == Export then Private else vis
-         cons <- traverse (checkCon (eopts elab) nest env cvis n_in (Resolved tidx)) cons_raw
+         cons <- traverse (checkCon elab nest env cvis n_in (Resolved tidx)) cons_raw
 
          let ddef = MkData (MkCon dfc n arity fullty) cons
          ignore $ addData vars vis tidx ddef
