@@ -34,14 +34,14 @@ elabRecord : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto m : Ref MD Metadata} ->
              {auto u : Ref UST UState} ->
-             List ElabOpt -> FC -> Env Term vars ->
+             Elaborator -> FC -> Env Term vars ->
              NestedNames vars -> Maybe String ->
              Visibility -> Name ->
              (params : List (Name, RigCount, PiInfo RawImp, RawImp)) ->
              (conName : Name) ->
              List IField ->
              Core ()
-elabRecord {vars} eopts fc env nest newns vis tn params conName_in fields
+elabRecord {vars} elab fc env nest newns vis tn params conName_in fields
     = do conName <- inCurrentNS conName_in
          elabAsData conName
          defs <- get Ctxt
@@ -212,8 +212,8 @@ processRecord : {vars : _} ->
                 {auto c : Ref Ctxt Defs} ->
                 {auto m : Ref MD Metadata} ->
                 {auto u : Ref UST UState} ->
-                List ElabOpt -> NestedNames vars ->
+                Elaborator -> NestedNames vars ->
                 Env Term vars -> Maybe String ->
                 Visibility -> ImpRecord -> Core ()
-processRecord eopts nest env newns vis (MkImpRecord fc n ps cons fs)
-    = elabRecord eopts fc env nest newns vis n ps cons fs
+processRecord elab nest env newns vis (MkImpRecord fc n ps cons fs)
+    = elabRecord elab fc env nest newns vis n ps cons fs

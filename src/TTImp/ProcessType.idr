@@ -205,19 +205,19 @@ initDef : {vars : _} ->
           {auto u : Ref UST UState} ->
           Elaborator ->
           Name -> Env Term vars -> Term vars -> List FnOpt -> Core Def
-initDef n env ty []
+initDef elab n env ty []
     = do addUserHole False n
          pure None
-initDef n env ty (ExternFn :: opts)
+initDef elab n env ty (ExternFn :: opts)
     = do defs <- get Ctxt
          a <- getArity defs env ty
          pure (ExternDef a)
-initDef n env ty (ForeignFn cs :: opts)
+initDef elab n env ty (ForeignFn cs :: opts)
     = do defs <- get Ctxt
          a <- getArity defs env ty
          cs' <- traverse (getFnString elab) cs
          pure (ForeignDef a cs')
-initDef n env ty (_ :: opts) = initDef n env ty opts
+initDef elab n env ty (_ :: opts) = initDef elab n env ty opts
 
 -- Find the inferrable argument positions in a type. This is useful for
 -- generalising partially evaluated definitions and (potentially) in interactive

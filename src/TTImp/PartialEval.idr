@@ -215,10 +215,12 @@ getReducible (n :: rest) refs defs
 mkSpecDef : {auto c : Ref Ctxt Defs} ->
             {auto m : Ref MD Metadata} ->
             {auto u : Ref UST UState} ->
+            Elaborator ->
             FC -> GlobalDef ->
             Name -> List (Nat, ArgMode) -> Name -> List (FC, Term vars) ->
             Core (Term vars)
-mkSpecDef {vars} fc gdef pename sargs fn stk
+            -- JE TODO: Always use default elab here?
+mkSpecDef {vars} elab fc gdef pename sargs fn stk
     = handleUnify
        (do defs <- get Ctxt
            setAllPublic True
@@ -274,7 +276,7 @@ mkSpecDef {vars} fc gdef pename sargs fn stk
                 | Nothing => pure (applyWithFC (Ref fc Func fn) stk)
            log "specialise" 5 $ "New patterns for " ++ show pename ++ ":\n" ++
                     showSep "\n" (map showPat newpats)
-           processDecl [InPartialEval] (MkNested []) []
+           processDecl (record {eopts = [InPartialEval]} elab) (MkNested []) []
                        (IDef fc (Resolved peidx) newpats)
            setAllPublic False
            pure peapp)
@@ -348,10 +350,11 @@ specialise : {vars : _} ->
              {auto c : Ref Ctxt Defs} ->
              {auto m : Ref MD Metadata} ->
              {auto u : Ref UST UState} ->
+             Elaborator ->
              FC -> Env Term vars -> GlobalDef ->
              Name -> List (FC, Term vars) ->
              Core (Maybe (Term vars))
-specialise {vars} fc env gdef fn stk
+specialise {vars} elab fc env gdef fn stk
     = case specArgs gdef of
         [] => pure Nothing
         specs =>
@@ -366,7 +369,7 @@ specialise {vars} fc env gdef fn stk
                             (UN ("PE_" ++ nameRoot fnfull ++ "_" ++ asHex nhash))
                defs <- get Ctxt
                case lookup pename (peFailures defs) of
-                    Nothing => Just <$> mkSpecDef fc gdef pename sargs fn stk
+                    Nothing => Just <$> mkSpecDef elab fc gdef pename sargs fn stk
                     Just _ => pure Nothing
   where
     dropAll : {vs : _} -> SubVars [] vs
@@ -396,36 +399,37 @@ findSpecs : {vars : _} ->
             {auto c : Ref Ctxt Defs} ->
             {auto m : Ref MD Metadata} ->
             {auto u : Ref UST UState} ->
+            Elaborator ->
             Env Term vars -> List (FC, Term vars) -> Term vars ->
             Core (Term vars)
-findSpecs env stk (Ref fc Func fn)
+findSpecs elab env stk (Ref fc Func fn)
     = do defs <- get Ctxt
          Just gdef <- lookupCtxtExact fn (gamma defs)
               | Nothing => pure (applyWithFC (Ref fc Func fn) stk)
-         Just r <- specialise fc env gdef fn stk
+         Just r <- specialise elab fc env gdef fn stk
               | Nothing => pure (applyWithFC (Ref fc Func fn) stk)
          pure r
-findSpecs env stk (Meta fc n i args)
-    = do args' <- traverse (findSpecs env []) args
+findSpecs elab env stk (Meta fc n i args)
+    = do args' <- traverse (findSpecs elab env []) args
          pure $ applyWithFC (Meta fc n i args') stk
-findSpecs env stk (Bind fc x b sc)
-    = do b' <- traverse (findSpecs env []) b
-         sc' <- findSpecs (b' :: env) [] sc
+findSpecs elab env stk (Bind fc x b sc)
+    = do b' <- traverse (findSpecs elab env []) b
+         sc' <- findSpecs elab (b' :: env) [] sc
          pure $ applyWithFC (Bind fc x b' sc') stk
-findSpecs env stk (App fc fn arg)
-    = do arg' <- findSpecs env [] arg
-         findSpecs env ((fc, arg') :: stk) fn
-findSpecs env stk (TDelayed fc r tm)
-    = do tm' <- findSpecs env [] tm
+findSpecs elab env stk (App fc fn arg)
+    = do arg' <- findSpecs elab env [] arg
+         findSpecs elab env ((fc, arg') :: stk) fn
+findSpecs elab env stk (TDelayed fc r tm)
+    = do tm' <- findSpecs elab env [] tm
          pure $ applyWithFC (TDelayed fc r tm') stk
-findSpecs env stk (TDelay fc r ty tm)
-    = do ty' <- findSpecs env [] ty
-         tm' <- findSpecs env [] tm
+findSpecs elab env stk (TDelay fc r ty tm)
+    = do ty' <- findSpecs elab env [] ty
+         tm' <- findSpecs elab env [] tm
          pure $ applyWithFC (TDelay fc r ty' tm') stk
-findSpecs env stk (TForce fc r tm)
-    = do tm' <- findSpecs env [] tm
+findSpecs elab env stk (TForce fc r tm)
+    = do tm' <- findSpecs elab env [] tm
          pure $ applyWithFC (TForce fc r tm') stk
-findSpecs env stk tm = pure $ applyWithFC tm stk
+findSpecs elab env stk tm = pure $ applyWithFC tm stk
 
 bName : {auto q : Ref QVar Int} -> String -> Core Name
 bName n
@@ -444,28 +448,31 @@ mutual
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
+              Elaborator ->
               Ref QVar Int -> Defs -> Bounds bound ->
               Env Term free -> List (Closure free) ->
               Core (List (Term (bound ++ free)))
-  quoteArgs q defs bounds env [] = pure []
-  quoteArgs q defs bounds env (a :: args)
+  quoteArgs elab q defs bounds env [] = pure []
+  quoteArgs elab q defs bounds env (a :: args)
       = pure $ (!(quoteGenNF q defs bounds env !(evalClosure defs a)) ::
-                !(quoteArgs q defs bounds env args))
+                !(quoteArgs elab q defs bounds env args))
 
   quoteArgsWithFC : {auto c : Ref Ctxt Defs} ->
                     {auto m : Ref MD Metadata} ->
                     {auto u : Ref UST UState} ->
                     {bound, free : _} ->
+                    Elaborator ->
                     Ref QVar Int -> Defs -> Bounds bound ->
                     Env Term free -> List (FC, Closure free) ->
                     Core (List (FC, Term (bound ++ free)))
-  quoteArgsWithFC q defs bounds env terms
+  quoteArgsWithFC elab q defs bounds env terms
       = pure $ zip (map fst terms) !(quoteArgs q defs bounds env (map snd terms))
 
   quoteHead : {bound, free : _} ->
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
+              Elaborator ->
               Ref QVar Int -> Defs ->
               FC -> Bounds bound -> Env Term free -> NHead free ->
               Core (Term (bound ++ free))
@@ -504,14 +511,15 @@ mutual
             {auto c : Ref Ctxt Defs} ->
             {auto m : Ref MD Metadata} ->
             {auto u : Ref UST UState} ->
+            Elaborator ->
             Ref QVar Int -> Defs -> Bounds bound ->
             Env Term free -> PiInfo (NF free) ->
             Core (PiInfo (Term (bound ++ free)))
-  quotePi q defs bounds env Explicit = pure Explicit
-  quotePi q defs bounds env Implicit = pure Implicit
-  quotePi q defs bounds env AutoImplicit = pure AutoImplicit
-  quotePi q defs bounds env (DefImplicit t)
-      = do t' <- quoteGenNF q defs bounds env t
+  quotePi elab q defs bounds env Explicit = pure Explicit
+  quotePi elab q defs bounds env Implicit = pure Implicit
+  quotePi elab q defs bounds env AutoImplicit = pure AutoImplicit
+  quotePi elab q defs bounds env (DefImplicit t)
+      = do t' <- quoteGenNF elab q defs bounds env t
            pure (DefImplicit t')
 
   quoteBinder : {bound, free : _} ->
@@ -522,46 +530,47 @@ mutual
                 Env Term free -> Binder (NF free) ->
                 Core (Binder (Term (bound ++ free)))
   quoteBinder q defs bounds env (Lam fc r p ty)
-      = do ty' <- quoteGenNF q defs bounds env ty
+      = do ty' <- quoteGenNF elab q defs bounds env ty
            p' <- quotePi q defs bounds env p
            pure (Lam fc r p' ty')
   quoteBinder q defs bounds env (Let fc r val ty)
-      = do val' <- quoteGenNF q defs bounds env val
-           ty' <- quoteGenNF q defs bounds env ty
+      = do val' <- quoteGenNF elab q defs bounds env val
+           ty' <- quoteGenNF elab q defs bounds env ty
            pure (Let fc r val' ty')
   quoteBinder q defs bounds env (Pi fc r p ty)
-      = do ty' <- quoteGenNF q defs bounds env ty
+      = do ty' <- quoteGenNF elab q defs bounds env ty
            p' <- quotePi q defs bounds env p
            pure (Pi fc r p' ty')
   quoteBinder q defs bounds env (PVar fc r p ty)
-      = do ty' <- quoteGenNF q defs bounds env ty
+      = do ty' <- quoteGenNF elab q defs bounds env ty
            p' <- quotePi q defs bounds env p
            pure (PVar fc r p' ty')
   quoteBinder q defs bounds env (PLet fc r val ty)
-      = do val' <- quoteGenNF q defs bounds env val
-           ty' <- quoteGenNF q defs bounds env ty
+      = do val' <- quoteGenNF elab q defs bounds env val
+           ty' <- quoteGenNF elab q defs bounds env ty
            pure (PLet fc r val' ty')
   quoteBinder q defs bounds env (PVTy fc r ty)
-      = do ty' <- quoteGenNF q defs bounds env ty
+      = do ty' <- quoteGenNF elab q defs bounds env ty
            pure (PVTy fc r ty')
 
   quoteGenNF : {bound, vars : _} ->
                {auto c : Ref Ctxt Defs} ->
                {auto m : Ref MD Metadata} ->
                {auto u : Ref UST UState} ->
+               Elaborator ->
                Ref QVar Int ->
                Defs -> Bounds bound ->
                Env Term vars -> NF vars -> Core (Term (bound ++ vars))
-  quoteGenNF q defs bound env (NBind fc n b sc)
+  quoteGenNF elab q defs bound env (NBind fc n b sc)
       = do var <- bName "qv"
-           sc' <- quoteGenNF q defs (Add n var bound) env
+           sc' <- quoteGenNF elab q defs (Add n var bound) env
                        !(sc defs (toClosure defaultOpts env (Ref fc Bound var)))
            b' <- quoteBinder q defs bound env b
            pure (Bind fc n b' sc')
   -- IMPORTANT CASE HERE
   -- If fn is to be specialised, quote the args directly (no further
   -- reduction) then call specialise. Otherwise, quote as normal
-  quoteGenNF q defs bound env (NApp fc (NRef Func fn) args)
+  quoteGenNF elab q defs bound env (NApp fc (NRef Func fn) args)
       = do Just gdef <- lookupCtxtExact fn (gamma defs)
                 | Nothing => do args' <- quoteArgsWithFC q defs bound env args
                                 pure $ applyWithFC (Ref fc Func fn) args'
@@ -584,76 +593,76 @@ mutual
            -- We're just using this to evaluate holes in the right scope, so
            -- a placeholder binder is fine
            = Lam fc top Explicit (Erased fc False) :: extendEnv bs env
-  quoteGenNF q defs bound env (NApp fc f args)
+  quoteGenNF elab q defs bound env (NApp fc f args)
       = do f' <- quoteHead q defs fc bound env f
            args' <- quoteArgsWithFC q defs bound env args
            pure $ applyWithFC f' args'
-  quoteGenNF q defs bound env (NDCon fc n t ar args)
+  quoteGenNF elab q defs bound env (NDCon fc n t ar args)
       = do args' <- quoteArgsWithFC q defs bound env args
            pure $ applyWithFC (Ref fc (DataCon t ar) n) args'
-  quoteGenNF q defs bound env (NTCon fc n t ar args)
+  quoteGenNF elab q defs bound env (NTCon fc n t ar args)
       = do args' <- quoteArgsWithFC q defs bound env args
            pure $ applyWithFC (Ref fc (TyCon t ar) n) args'
-  quoteGenNF q defs bound env (NAs fc s n pat)
-      = do n' <- quoteGenNF q defs bound env n
-           pat' <- quoteGenNF q defs bound env pat
+  quoteGenNF elab q defs bound env (NAs fc s n pat)
+      = do n' <- quoteGenNF elab q defs bound env n
+           pat' <- quoteGenNF elab q defs bound env pat
            pure (As fc s n' pat')
-  quoteGenNF q defs bound env (NDelayed fc r arg)
-      = do argQ <- quoteGenNF q defs bound env arg
+  quoteGenNF elab q defs bound env (NDelayed fc r arg)
+      = do argQ <- quoteGenNF elab q defs bound env arg
            pure (TDelayed fc r argQ)
-  quoteGenNF q defs bound env (NDelay fc r ty arg)
+  quoteGenNF elab q defs bound env (NDelay fc r ty arg)
       -- unlike main evaluator, we want to look under Delays
       = do argNF <- evalClosure defs arg
-           argQ <- quoteGenNF q defs bound env argNF
+           argQ <- quoteGenNF elab q defs bound env argNF
            tyNF <- evalClosure defs ty
-           tyQ <- quoteGenNF q defs bound env tyNF
+           tyQ <- quoteGenNF elab q defs bound env tyNF
            pure (TDelay fc r tyQ argQ)
     where
       toHolesOnly : Closure vs -> Closure vs
       toHolesOnly (MkClosure _ locs env tm)
           = MkClosure withHoles locs env tm
       toHolesOnly c = c
-  quoteGenNF q defs bound env (NForce fc r arg args)
+  quoteGenNF elab q defs bound env (NForce fc r arg args)
       = do args' <- quoteArgsWithFC q defs bound env args
            case arg of
                 NDelay fc _ _ arg =>
                    do argNF <- evalClosure defs arg
-                      pure $ applyWithFC !(quoteGenNF q defs bound env argNF) args'
-                _ => do arg' <- quoteGenNF q defs bound env arg
+                      pure $ applyWithFC !(quoteGenNF elab q defs bound env argNF) args'
+                _ => do arg' <- quoteGenNF elab q defs bound env arg
                         pure $ applyWithFC (TForce fc r arg') args'
-  quoteGenNF q defs bound env (NPrimVal fc c) = pure $ PrimVal fc c
-  quoteGenNF q defs bound env (NErased fc i) = pure $ Erased fc i
-  quoteGenNF q defs bound env (NType fc) = pure $ TType fc
+  quoteGenNF elab q defs bound env (NPrimVal fc c) = pure $ PrimVal fc c
+  quoteGenNF elab q defs bound env (NErased fc i) = pure $ Erased fc i
+  quoteGenNF elab q defs bound env (NType fc) = pure $ TType fc
 
-evalRHS : {vars : _} ->
-          {auto c : Ref Ctxt Defs} ->
-          {auto m : Ref MD Metadata} ->
-          {auto u : Ref UST UState} ->
-          Env Term vars -> NF vars -> Core (Term vars)
-evalRHS env nf
-    = do q <- newRef QVar 0
-         defs <- get Ctxt
-         quoteGenNF q defs None env nf
+-- evalRHS : {vars : _} ->
+--           {auto c : Ref Ctxt Defs} ->
+--           {auto m : Ref MD Metadata} ->
+--           {auto u : Ref UST UState} ->
+--           Env Term vars -> NF vars -> Core (Term vars)
+-- evalRHS env nf
+--     = do q <- newRef QVar 0
+--          defs <- get Ctxt
+--          quoteGenNF q defs None env nf
 
-export
-applySpecialise : {vars : _} ->
-                  {auto c : Ref Ctxt Defs} ->
-                  {auto m : Ref MD Metadata} ->
-                  {auto u : Ref UST UState} ->
-                  Env Term vars ->
-                  Maybe (List (Name, Nat)) ->
-                        -- ^ If we're specialising, names to reduce in the RHS
-                        -- with their reduction limits
-                  Term vars -> -- initial RHS
-                  Core (Term vars)
-applySpecialise env Nothing tm
-    = findSpecs env [] tm -- not specialising, just search through RHS
-applySpecialise env (Just ls) tmin -- specialising, evaluate RHS while looking
-                                 -- for names to specialise
-    = do defs <- get Ctxt
-         tm <- toResolvedNames tmin
-         nf <- nf defs env tm
-         tm' <- evalRHS env nf
-         tmfull <- toFullNames tm'
-         logTermNF "specialise" 5 ("New RHS") env tmfull
-         pure tmfull
+-- export
+-- applySpecialise : {vars : _} ->
+--                   {auto c : Ref Ctxt Defs} ->
+--                   {auto m : Ref MD Metadata} ->
+--                   {auto u : Ref UST UState} ->
+--                   Env Term vars ->
+--                   Maybe (List (Name, Nat)) ->
+--                         -- ^ If we're specialising, names to reduce in the RHS
+--                         -- with their reduction limits
+--                   Term vars -> -- initial RHS
+--                   Core (Term vars)
+-- applySpecialise env Nothing tm
+--     = findSpecs env [] tm -- not specialising, just search through RHS
+-- applySpecialise env (Just ls) tmin -- specialising, evaluate RHS while looking
+--                                  -- for names to specialise
+--     = do defs <- get Ctxt
+--          tm <- toResolvedNames tmin
+--          nf <- nf defs env tm
+--          tm' <- evalRHS env nf
+--          tmfull <- toFullNames tm'
+--          logTermNF "specialise" 5 ("New RHS") env tmfull
+--          pure tmfull

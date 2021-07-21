@@ -799,7 +799,7 @@ processDecl : {vars : _} ->
               {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
-              List ElabOpt -> NestedNames vars ->
+              Elaborator -> NestedNames vars ->
               Env Term vars -> ImpDecl -> Core ()
 
 -- Check whether two terms are convertible. May solve metavariables (in Ctxt)

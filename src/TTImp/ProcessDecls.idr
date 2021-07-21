@@ -36,30 +36,30 @@ process : {vars : _} ->
           {auto c : Ref Ctxt Defs} ->
           {auto m : Ref MD Metadata} ->
           {auto u : Ref UST UState} ->
-          List ElabOpt ->
+          Elaborator ->
           NestedNames vars -> Env Term vars -> ImpDecl -> Core ()
-process eopts nest env (IClaim fc rig vis opts ty)
-    = processType eopts nest env fc rig vis opts ty
-process eopts nest env (IData fc vis ddef)
-    = processData eopts nest env fc vis ddef
-process eopts nest env (IDef fc fname def)
-    = processDef eopts nest env fc fname def
-process eopts nest env (IParameters fc ps decls)
-    = processParams nest env fc ps decls
-process eopts nest env (IRecord fc ns vis rec)
-    = processRecord eopts nest env ns vis rec
-process eopts nest env (INamespace fc ns decls)
+process elab nest env (IClaim fc rig vis opts ty)
+    = processType elab nest env fc rig vis opts ty
+process elab nest env (IData fc vis ddef)
+    = processData elab nest env fc vis ddef
+process elab nest env (IDef fc fname def)
+    = processDef elab nest env fc fname def
+process elab nest env (IParameters fc ps decls)
+    = processParams elab nest env fc ps decls
+process elab nest env (IRecord fc ns vis rec)
+    = processRecord elab nest env ns vis rec
+process elab nest env (INamespace fc ns decls)
     = withExtendedNS ns $
-         traverse_ (processDecl eopts nest env) decls
-process eopts nest env (ITransform fc n lhs rhs)
+         traverse_ (processDecl elab nest env) decls
+process elab nest env (ITransform fc n lhs rhs)
     = processTransform eopts nest env fc n lhs rhs
-process eopts nest env (IRunElabDecl fc tm)
-    = processRunElab eopts nest env fc tm
-process eopts nest env (IPragma _ act)
+process elab nest env (IRunElabDecl fc tm)
+    = processRunElab elab nest env fc tm
+process elab nest env (IPragma _ act)
     = act nest env
-process eopts nest env (ILog lvl)
+process elab nest env (ILog lvl)
     = addLogLevel (uncurry unsafeMkLogLevel <$> lvl)
-process eopts nest env (IBuiltin fc type name)
+process elab nest env (IBuiltin fc type name)
     = processBuiltin nest env fc type name
 
 TTImp.Elab.Check.processDecl = process
