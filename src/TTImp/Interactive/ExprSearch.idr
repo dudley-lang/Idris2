@@ -851,29 +851,31 @@ getLHSData defs (Just tm)
 firstLinearOK : {auto c : Ref Ctxt Defs} ->
                 {auto m : Ref MD Metadata} ->
                 {auto u : Ref UST UState} ->
+                Elaborator ->
                 FC -> Search (ClosedTerm, ExprDefs) ->
                 Core (Search RawImp)
-firstLinearOK fc NoMore = noResult
-firstLinearOK fc (Result (t, ds) next)
+firstLinearOK elab fc NoMore = noResult
+firstLinearOK elab fc (Result (t, ds) next)
     = handleUnify
             (do unless (isNil ds) $
-                   traverse_ (processDecl [InCase] (MkNested []) []) ds
+                   traverse_ (processDecl (record {eopts = [InCase]} elab) (MkNested []) []) ds
                 ignore $ linearCheck fc linear False [] t
                 defs <- get Ctxt
                 nft <- normaliseHoles defs [] t
                 raw <- unelab [] !(toFullNames nft)
-                pure (Result raw (firstLinearOK fc !next)))
+                pure (Result raw (firstLinearOK elab fc !next)))
             (\err =>
                 do next' <- next
-                   firstLinearOK fc next')
+                   firstLinearOK elab fc next')
 
 export
 exprSearchOpts : {auto c : Ref Ctxt Defs} ->
                  {auto m : Ref MD Metadata} ->
                  {auto u : Ref UST UState} ->
+                 Elaborator ->
                  SearchOpts -> FC -> Name -> List Name ->
                  Core (Search RawImp)
-exprSearchOpts opts fc n_in hints
+exprSearchOpts elab opts fc n_in hints
     = do defs <- get Ctxt
          Just (n, idx, gdef) <- lookupHoleName n_in defs
              | Nothing => undefinedName fc n_in
@@ -891,7 +893,7 @@ exprSearchOpts opts fc n_in hints
                              pure (record { recData = d } opts)
                      else pure opts
          res <- search fc (multiplicity gdef) opts' (type gdef) n
-         firstLinearOK fc res
+         firstLinearOK elab fc res
   where
     lookupHoleName : Name -> Defs -> Core (Maybe (Name, Int, GlobalDef))
     lookupHoleName n defs
@@ -904,19 +906,21 @@ exprSearchOpts opts fc n_in hints
 exprSearch' : {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
+              Elaborator ->
               FC -> Name -> List Name ->
               Core (Search RawImp)
-exprSearch' = exprSearchOpts (initSearchOpts True 5)
+exprSearch' elab = exprSearchOpts elab (initSearchOpts True 5)
 
 export
 exprSearch : {auto c : Ref Ctxt Defs} ->
              {auto m : Ref MD Metadata} ->
              {auto u : Ref UST UState} ->
+             Elaborator ->
              FC -> Name -> List Name ->
              Core (Search RawImp)
-exprSearch fc n hints
+exprSearch elab fc n hints
     = do startTimer (searchTimeout !getSession) "expression search"
-         res <- exprSearch' fc n hints
+         res <- exprSearch' elab fc n hints
          clearTimer
          pure res
 
@@ -924,8 +928,9 @@ export
 exprSearchN : {auto c : Ref Ctxt Defs} ->
               {auto m : Ref MD Metadata} ->
               {auto u : Ref UST UState} ->
+              Elaborator ->
               FC -> Nat -> Name -> List Name ->
               Core (List RawImp)
-exprSearchN fc max n hints
-    = do (res, _) <- searchN max (exprSearch fc n hints)
+exprSearchN elab fc max n hints
+    = do (res, _) <- searchN max (exprSearch elab fc n hints)
          pure res

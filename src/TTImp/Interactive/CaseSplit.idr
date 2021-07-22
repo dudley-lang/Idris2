@@ -11,7 +11,7 @@ import Core.TT
 import Core.UnifyState
 import Core.Value
 
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.Elab.Check
 import TTImp.ProcessDef
 import TTImp.ProcessDecls
@@ -328,8 +328,9 @@ getUpdates defs orig updated
 
 mkCase : {auto c : Ref Ctxt Defs} ->
          {auto u : Ref UST UState} ->
+         Elaborator ->
          Int -> RawImp -> RawImp -> Core ClauseUpdate
-mkCase {c} {u} fn orig lhs_raw
+mkCase {c} {u} elab fn orig lhs_raw
     = do m <- newRef MD (initMetadata $ Virtual Interactive)
          defs <- get Ctxt
          ust <- get UST
@@ -344,8 +345,8 @@ mkCase {c} {u} fn orig lhs_raw
                -- Use 'Rig0' since it might be a type level function, or it might
                -- be an erased name in a case block (which will be bound elsewhere
                -- once split and turned into a pattern)
-               (lhs, _) <- elabTerm {c} {m} {u}
-                                    fn (InLHS erased) [] (MkNested [])
+               (lhs, _) <- elabTerm elab {c} {m} {u}
+                                    fn (InLHS erased) (MkNested [])
                                     [] (IBindHere (getFC lhs_raw) PATTERN lhs_raw)
                                     Nothing
                -- Revert all public back to false
@@ -387,9 +388,10 @@ export
 getSplitsLHS : {auto m : Ref MD Metadata} ->
                {auto c : Ref Ctxt Defs} ->
                {auto u : Ref UST UState} ->
+               Elaborator ->
                FC -> Nat -> ClosedTerm -> Name ->
                Core (SplitResult (List ClauseUpdate))
-getSplitsLHS fc envlen lhs_in n
+getSplitsLHS elab fc envlen lhs_in n
     = do let lhs = substLets lhs_in
          logTerm "interaction.casesplit" 3 "Splitting" lhs_in
          let usedns = findAllVars lhs_in
@@ -404,7 +406,7 @@ getSplitsLHS fc envlen lhs_in n
 
          let Just idx = getNameID fn (gamma defs)
              | Nothing => undefinedName fc fn
-         cases <- traverse (mkCase idx rawlhs) trycases
+         cases <- traverse (mkCase elab idx rawlhs) trycases
          log "interaction.casesplit" 3 $ "Found cases: " ++ show cases
 
          pure (combine cases [])
@@ -413,9 +415,10 @@ export
 getSplits : {auto c : Ref Ctxt Defs} ->
             {auto m : Ref MD Metadata} ->
             {auto u : Ref UST UState} ->
+            Elaborator ->
             (NonEmptyFC -> ClosedTerm -> Bool) -> Name ->
             Core (SplitResult (List ClauseUpdate))
-getSplits p n
+getSplits elab p n
     = do Just (loc, envlen, lhs_in) <- findLHSAt p
               | Nothing => pure (SplitFail CantFindLHS)
-         getSplitsLHS (justFC loc) envlen lhs_in n
+         getSplitsLHS elab (justFC loc) envlen lhs_in n

@@ -13,7 +13,7 @@ import Idris.Resugar
 import Idris.Syntax
 
 import TTImp.BindImplicits
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.Elab.Check
 import TTImp.ProcessDecls
 import TTImp.TTImp
@@ -112,6 +112,7 @@ elabImplementation : {vars : _} ->
                      {auto u : Ref UST UState} ->
                      {auto s : Ref Syn SyntaxInfo} ->
                      {auto m : Ref MD Metadata} ->
+                     Elaborator ->
                      FC -> Visibility -> List FnOpt -> Pass ->
                      Env Term vars -> NestedNames vars ->
                      (implicits : List (Name, RigCount, RawImp)) ->
@@ -124,7 +125,7 @@ elabImplementation : {vars : _} ->
                      Maybe (List ImpDecl) ->
                      Core ()
 -- TODO: Refactor all these steps into separate functions
-elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named impName_in nusing mbody
+elabImplementation {vars} elab ifc vis opts_in pass env nest is cons iname ps named impName_in nusing mbody
     = do -- let impName_in = maybe (mkImplName fc iname ps) id impln
          -- If we're in a nested block, update the name
          let impName_nest = case lookup impName_in (names nest) of
@@ -182,7 +183,7 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
 
          log "elab.implementation" 5 $ "Implementation type: " ++ show impTy
 
-         when (typePass pass) $ processDecl [] nest env impTyDecl
+         when (typePass pass) $ processDecl (record {eopts = []} elab) nest env impTyDecl
 
          -- If the body is empty, we're done for now (just declaring that
          -- the implementation exists and define it later)
@@ -220,7 +221,7 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                                       (implParams cdata) (params cdata)
                                       (map name (methods cdata))
                                       (methods cdata)
-               traverse_ (processDecl [] nest env) (map mkTopMethDecl fns)
+               traverse_ (processDecl (record {eopts = []} elab) nest env) (map mkTopMethDecl fns)
 
                -- 3. Build the record for the implementation
                let mtops = map (Builtin.fst . snd) fns
@@ -251,7 +252,7 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                names' <- traverse applyEnv (impName :: mtops)
                let nest' = record { names $= (names' ++) } nest
 
-               traverse_ (processDecl [] nest' env) [impFn]
+               traverse_ (processDecl (record {eopts = []} elab) nest' env) [impFn]
                unsetFlag vfc impName BlockedHint
 
                setFlag vfc impName TCInline
@@ -266,10 +267,10 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
                body' <- traverse (updateBody upds) body
 
                log "elab.implementation" 10 $ "Implementation body: " ++ show body'
-               traverse_ (processDecl [] nest' env) body'
+               traverse_ (processDecl (record {eopts = []} elab) nest' env) body'
 
                -- 6. Add transformation rules for top level methods
-               traverse_ (addTransform impName upds) (methods cdata)
+               traverse_ (addTransform elab impName upds) (methods cdata)
 
                -- inline flag has done its job, and outside the interface
                -- it can hurt, so unset it now
@@ -501,10 +502,10 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
         = throw (GenericMsg (getFC e)
                    "Implementation body can only contain definitions")
 
-    addTransform : Name -> List (Name, Name) ->
+    addTransform : Elaborator -> Name -> List (Name, Name) ->
                    Method ->
                    Core ()
-    addTransform iname ns meth
+    addTransform elab iname ns meth
         = do log "elab.implementation" 3 $
                      "Adding transform for " ++ show meth.name ++ " : " ++ show meth.type ++
                      "\n\tfor " ++ show iname ++ " in " ++ show ns
@@ -516,7 +517,7 @@ elabImplementation {vars} ifc vis opts_in pass env nest is cons iname ps named i
              let rhs = IVar vfc mname
              log "elab.implementation" 5 $ show lhs ++ " ==> " ++ show rhs
              handleUnify
-                 (processDecl [] nest env
+                 (processDecl (record {eopts = []} elab) nest env
                      (ITransform vfc (UN (show meth.name ++ " " ++ show iname)) lhs rhs))
                  (\err =>
                      log "elab.implementation" 5 $ "Can't add transform " ++

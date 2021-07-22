@@ -16,7 +16,7 @@ import Idris.Syntax
 
 import TTImp.BindImplicits
 import TTImp.ProcessDecls
-import TTImp.Elab
+-- import TTImp.Elab
 import TTImp.Elab.Check
 import TTImp.Unelab
 import TTImp.TTImp
@@ -333,6 +333,7 @@ elabInterface : {vars : _} ->
                 {auto u : Ref UST UState} ->
                 {auto s : Ref Syn SyntaxInfo} ->
                 {auto m : Ref MD Metadata} ->
+                Elaborator ->
                 FC -> Visibility ->
                 Env Term vars -> NestedNames vars ->
                 (constraints : List (Maybe Name, RawImp)) ->
@@ -342,7 +343,7 @@ elabInterface : {vars : _} ->
                 (conName : Maybe Name) ->
                 List ImpDecl ->
                 Core ()
-elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
+elabInterface {vars} elab ifc vis env nest constraints iname params dets mcon body
     = do fullIName <- getFullName iname
          ns_iname <- inCurrentNS fullIName
          let conName_in = maybe (mkCon vfc fullIName) id mcon
@@ -353,10 +354,10 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
          let meth_names = map name meth_decls
          let defaults = mapMaybe getDefault body
 
-         elabAsData conName meth_names meth_sigs
-         elabConstraintHints conName meth_names
-         elabMethods conName meth_names meth_sigs
-         ds <- traverse (elabDefault meth_decls) defaults
+         elabAsData elab conName meth_names meth_sigs
+         elabConstraintHints elab conName meth_names
+         elabMethods elab conName meth_names meth_sigs
+         ds <- traverse (elabDefault elab meth_decls) defaults
 
          ns_meths <- traverse (\mt => do n <- inCurrentNS mt.name
                                          pure (record { name = n } mt)) meth_decls
@@ -381,10 +382,10 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
         = (UN ("__con" ++ show i), ty) :: nameCons (i + 1) rest
 
     -- Elaborate the data declaration part of the interface
-    elabAsData : (conName : Name) -> List Name ->
+    elabAsData : Elaborator -> (conName : Name) -> List Name ->
                  List Signature ->
                  Core ()
-    elabAsData conName meth_names meth_sigs
+    elabAsData elab conName meth_names meth_sigs
         = do -- set up the implicit arguments correctly in the method
              -- signatures and constraint hints
              meths <- traverse (\ meth => getMethDecl env nest params meth_names
@@ -399,12 +400,12 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
                                   dets meths
              log "elab.interface" 10 $ "Methods: " ++ show meths
              log "elab.interface" 5 $ "Making interface data type " ++ show dt
-             ignore $ processDecls nest env [dt]
+             ignore $ processDecls elab nest env [dt]
 
-    elabMethods : (conName : Name) -> List Name ->
+    elabMethods : Elaborator -> (conName : Name) -> List Name ->
                   List Signature ->
                   Core ()
-    elabMethods conName meth_names meth_sigs
+    elabMethods elab conName meth_names meth_sigs
         = do -- Methods have same visibility as data declaration
              fnsm <- traverse (getMethToplevel env vis iname conName
                                                (map fst constraints)
@@ -412,7 +413,7 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
                                                params) meth_sigs
              let fns = concat fnsm
              log "elab.interface" 5 $ "Top level methods: " ++ show fns
-             traverse_ (processDecl [] nest env) fns
+             traverse_ (processDecl (record {eopts = []} elab) nest env) fns
              traverse_ (\n => do mn <- inCurrentNS n
                                  setFlag vfc mn Inline
                                  setFlag vfc mn TCInline
@@ -421,10 +422,10 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
     -- Check that a default definition is correct. We just discard it here once
     -- we know it's okay, since we'll need to re-elaborate it for each
     -- instance, to specialise it
-    elabDefault : List Declaration ->
+    elabDefault : Elaborator -> List Declaration ->
                   (FC, List FnOpt, Name, List ImpClause) ->
                   Core (Name, List ImpClause)
-    elabDefault tydecls (dfc, opts, n, cs)
+    elabDefault elab tydecls (dfc, opts, n, cs)
         = do -- orig <- branch
 
              let dn_in = MN ("Default implementation of " ++ show n) 0
@@ -453,12 +454,12 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
 
              let dtydecl = IClaim vdfc rig vis [] (MkImpTy EmptyFC EmptyFC dn dty_imp)
 
-             processDecl [] nest env dtydecl
+             processDecl (record {eopts = []} elab) nest env dtydecl
 
              cs' <- traverse (changeName dn) cs
              log "elab.interface.default" 5 $ "Default method body " ++ show cs'
 
-             processDecl [] nest env (IDef vdfc dn cs')
+             processDecl (record {eopts = []} elab) nest env (IDef vdfc dn cs')
              -- Reset the original context, we don't need to keep the definition
              -- Actually we do for the metadata and name map!
 --              put Ctxt orig
@@ -510,15 +511,15 @@ elabInterface {vars} ifc vis env nest constraints iname params dets mcon body
         changeName dn (ImpossibleClause fc lhs)
             = ImpossibleClause fc <$> changeNameTerm dn lhs
 
-    elabConstraintHints : (conName : Name) -> List Name ->
+    elabConstraintHints : Elaborator -> (conName : Name) -> List Name ->
                           Core ()
-    elabConstraintHints conName meth_names
+    elabConstraintHints elab conName meth_names
         = do let nconstraints = nameCons 0 constraints
              chints <- traverse (getConstraintHint vfc env vis iname conName
                                                  (map fst nconstraints)
                                                  meth_names
                                                  paramNames) nconstraints
              log "elab.interface" 5 $ "Constraint hints from " ++ show constraints ++ ": " ++ show chints
-             traverse_ (processDecl [] nest env) (concatMap snd chints)
+             traverse_ (processDecl (record {eopts = []} elab) nest env) (concatMap snd chints)
              traverse_ (\n => do mn <- inCurrentNS n
                                  setFlag vfc mn TCInline) (map fst chints)
