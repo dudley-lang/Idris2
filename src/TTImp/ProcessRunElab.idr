@@ -34,4 +34,4 @@ processRunElab elab nest env fc tm
          exp <- appCon fc defs n [unit]
 
          stm <- checkTerm tidx InExpr elab nest env tm (gnf env exp)
-         ignore $ elabScript fc nest env !(nfOpts withAll defs env stm) Nothing
+         ignore $ elabScript elab fc nest env !(nfOpts withAll defs env stm) Nothing

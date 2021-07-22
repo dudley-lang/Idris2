@@ -105,7 +105,7 @@ elabRecord {vars} elab fc env nest newns vis tn params conName_in fields
                                            map fname fields ++ vars)
                                          (mkDataTy fc params)) [] [con]
              log "declare.record" 5 $ "Record data type " ++ show dt
-             processDecl [] nest env (IData fc vis dt)
+             processDecl (record {eopts = []} elab) nest env (IData fc vis dt)
 
     countExp : Term vs -> Nat
     countExp (Bind _ _ (Pi _ _ Explicit _) sc) = S (countExp sc)
@@ -159,7 +159,7 @@ elabRecord {vars} elab fc env nest newns vis tn params conName_in fields
 
                    log "declare.record.projection" 5 $
                       "Projection " ++ show rfNameNS ++ " : " ++ show projTy
-                   processDecl [] nest env (mkProjClaim rfNameNS)
+                   processDecl (record {eopts = []} elab) nest env (mkProjClaim rfNameNS)
 
                    -- Define the LHS and RHS
                    let lhs_exp
@@ -176,7 +176,7 @@ elabRecord {vars} elab fc env nest newns vis tn params conName_in fields
                                              (IBindVar bfc fldNameStr))
                    let rhs = IVar EmptyFC (UN fldNameStr)
                    log "declare.record.projection" 5 $ "Projection " ++ show lhs ++ " = " ++ show rhs
-                   processDecl [] nest env
+                   processDecl (record {eopts = []} elab) nest env
                        (IDef bfc rfNameNS [PatClause bfc lhs rhs])
 
                    -- Make prefix projection aliases if requested
@@ -185,14 +185,14 @@ elabRecord {vars} elab fc env nest newns vis tn params conName_in fields
                      -- we just reuse `projTy` defined above
                      log "declare.record.projection.prefix" 5 $
                        "Prefix projection " ++ show unNameNS ++ " : " ++ show projTy
-                     processDecl [] nest env (mkProjClaim unNameNS)
+                     processDecl (record {eopts = []} elab) nest env (mkProjClaim unNameNS)
 
                      -- Define the LHS and RHS
                      let lhs = IVar bfc unNameNS
                      let rhs = IVar bfc rfNameNS
                      log "declare.record.projection.prefix" 5 $
                        "Prefix projection " ++ show lhs ++ " = " ++ show rhs
-                     processDecl [] nest env
+                     processDecl (record {eopts = []} elab) nest env
                          (IDef bfc unNameNS [PatClause bfc lhs rhs])
 
                    -- Move on to the next getter.

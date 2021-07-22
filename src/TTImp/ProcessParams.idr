@@ -53,7 +53,7 @@ processParams {vars} {c} {m} {u} elab nest env fc ps ds
          let defNames = definedInBlock (currentNS defs) ds
          names' <- traverse (applyEnv env') defNames
          let nestBlock = record { names $= (names' ++) } nest'
-         traverse_ (processDecl [] nestBlock env') ds
+         traverse_ (processDecl (record {eopts = []} elab) nestBlock env') ds
   where
     mkParamTy : List (Name, RigCount, PiInfo RawImp, RawImp) -> RawImp
     mkParamTy [] = IType fc

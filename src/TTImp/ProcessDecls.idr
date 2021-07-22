@@ -52,7 +52,7 @@ process elab nest env (INamespace fc ns decls)
     = withExtendedNS ns $
          traverse_ (processDecl elab nest env) decls
 process elab nest env (ITransform fc n lhs rhs)
-    = processTransform eopts nest env fc n lhs rhs
+    = processTransform elab nest env fc n lhs rhs
 process elab nest env (IRunElabDecl fc tm)
     = processRunElab elab nest env fc tm
 process elab nest env (IPragma _ act)
@@ -124,19 +124,21 @@ processDecls : {vars : _} ->
                {auto c : Ref Ctxt Defs} ->
                {auto m : Ref MD Metadata} ->
                {auto u : Ref UST UState} ->
+               Elaborator ->
                NestedNames vars -> Env Term vars -> List ImpDecl -> Core Bool
-processDecls nest env decls
-    = do traverse_ (processDecl [] nest env) decls
+processDecls elab nest env decls
+    = do traverse_ (processDecl (record {eopts = []} elab) nest env) decls
          pure True -- TODO: False on error
 
 processTTImpDecls : {vars : _} ->
                     {auto c : Ref Ctxt Defs} ->
                     {auto m : Ref MD Metadata} ->
                     {auto u : Ref UST UState} ->
+                    Elaborator ->
                     NestedNames vars -> Env Term vars -> List ImpDecl -> Core Bool
-processTTImpDecls {vars} nest env decls
+processTTImpDecls {vars} elab nest env decls
     = do traverse_ (\d => do d' <- bindNames d
-                             processDecl [] nest env d') decls
+                             processDecl (record {eopts = []} elab) nest env d') decls
          pure True -- TODO: False on error
   where
     bindConNames : ImpTy -> Core ImpTy
@@ -167,8 +169,9 @@ export
 processTTImpFile : {auto c : Ref Ctxt Defs} ->
                    {auto m : Ref MD Metadata} ->
                    {auto u : Ref UST UState} ->
+                   Elaborator ->
                    String -> Core Bool
-processTTImpFile fname
+processTTImpFile elab fname
     = do modIdent <- ctxtPathToNS fname
          Right (decor, tti) <- logTime "Parsing" $
                             coreLift $ parseFile fname (PhysicalIdrSrc modIdent)
@@ -178,7 +181,7 @@ processTTImpFile fname
                | Left err => do coreLift (putStrLn (show err))
                                 pure False
          logTime "Elaboration" $
-            catch (do ignore $ processTTImpDecls (MkNested []) [] tti
+            catch (do ignore $ processTTImpDecls elab (MkNested []) [] tti
                       Nothing <- checkDelayedHoles
                           | Just err => throw err
                       pure True)
