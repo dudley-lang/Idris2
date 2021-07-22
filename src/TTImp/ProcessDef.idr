@@ -565,7 +565,7 @@ checkClause {vars} mult vis totreq hashit n elab nest env
          let nest'' = record { names $= (nestname ::) } nest
 
          let wdef = IDef ifc wname cs'
-         processDecl [] nest'' env wdef
+         processDecl elab nest'' env wdef
 
          pure (Right (MkClause env' lhspat rhs))
   where
@@ -731,8 +731,9 @@ calcRefs rt at fn
 mkRunTime : {auto c : Ref Ctxt Defs} ->
             {auto m : Ref MD Metadata} ->
             {auto u : Ref UST UState} ->
+            Elaborator ->
             FC -> Name -> Core ()
-mkRunTime fc n
+mkRunTime elab fc n
     = do log "compile.casetree" 5 $ "Making run time definition for " ++ show !(toFullNames n)
          defs <- get Ctxt
          Just gdef <- lookupCtxtExact n (gamma defs)
@@ -745,7 +746,7 @@ mkRunTime fc n
            let ty = type gdef
            -- Prepare RHS of definitions, by erasing 0-multiplicities, and
            -- finding any applications to specialise (partially evaluate)
-           pats' <- traverse (toErased (location gdef) (getSpec (flags gdef)))
+           pats' <- traverse (toErased elab (location gdef) (getSpec (flags gdef)))
                              pats
 
            let clauses_init = map (toClause (location gdef)) pats'
@@ -808,14 +809,14 @@ mkRunTime fc n
     getSpec (PartialEval n :: _) = Just n
     getSpec (x :: xs) = getSpec xs
 
-    toErased : FC -> Maybe (List (Name, Nat)) ->
+    toErased : Elaborator -> FC -> Maybe (List (Name, Nat)) ->
                (vars ** (Env Term vars, Term vars, Term vars)) ->
                Core (vars ** (Env Term vars, Term vars, Term vars))
-    toErased fc spec (_ ** (env, lhs, rhs))
+    toErased elab fc spec (_ ** (env, lhs, rhs))
         = do lhs_erased <- linearCheck fc linear True env lhs
              -- Partially evaluate RHS here, where appropriate
              rhs' <- applyTransforms env rhs
-             rhs' <- applySpecialise env spec rhs'
+             rhs' <- applySpecialise elab env spec rhs'
              rhs_erased <- linearCheck fc linear True env rhs'
              pure (_ ** (env, lhs_erased, rhs_erased))
 
@@ -826,10 +827,11 @@ mkRunTime fc n
 compileRunTime : {auto c : Ref Ctxt Defs} ->
                  {auto m : Ref MD Metadata} ->
                  {auto u : Ref UST UState} ->
+                 Elaborator ->
                  FC -> Name -> Core ()
-compileRunTime fc atotal
+compileRunTime elab fc atotal
     = do defs <- get Ctxt
-         traverse_ (mkRunTime fc) (toCompileCase defs)
+         traverse_ (mkRunTime elab fc) (toCompileCase defs)
          traverse_ (calcRefs True atotal) (toCompileCase defs)
 
          defs <- get Ctxt
@@ -925,7 +927,7 @@ processDef elab nest env fc n_in cs_in
          -- If we're not in a case tree, compile all the outstanding case
          -- trees.
          when (not (elem InCase (eopts elab))) $
-              compileRunTime fc atotal
+              compileRunTime elab fc atotal
   where
     -- Move `withTotality` to Core.Context if we need it elsewhere
     ||| Temporarily rebind the default totality requirement (%default total/partial/covering).

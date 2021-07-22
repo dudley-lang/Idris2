@@ -635,35 +635,37 @@ mutual
   quoteGenNF elab q defs bound env (NErased fc i) = pure $ Erased fc i
   quoteGenNF elab q defs bound env (NType fc) = pure $ TType fc
 
--- evalRHS : {vars : _} ->
---           {auto c : Ref Ctxt Defs} ->
---           {auto m : Ref MD Metadata} ->
---           {auto u : Ref UST UState} ->
---           Env Term vars -> NF vars -> Core (Term vars)
--- evalRHS env nf
---     = do q <- newRef QVar 0
---          defs <- get Ctxt
---          quoteGenNF q defs None env nf
+evalRHS : {vars : _} ->
+          {auto c : Ref Ctxt Defs} ->
+          {auto m : Ref MD Metadata} ->
+          {auto u : Ref UST UState} ->
+          Elaborator ->
+          Env Term vars -> NF vars -> Core (Term vars)
+evalRHS elab env nf
+    = do q <- newRef QVar 0
+         defs <- get Ctxt
+         quoteGenNF elab q defs None env nf
 
--- export
--- applySpecialise : {vars : _} ->
---                   {auto c : Ref Ctxt Defs} ->
---                   {auto m : Ref MD Metadata} ->
---                   {auto u : Ref UST UState} ->
---                   Env Term vars ->
---                   Maybe (List (Name, Nat)) ->
---                         -- ^ If we're specialising, names to reduce in the RHS
---                         -- with their reduction limits
---                   Term vars -> -- initial RHS
---                   Core (Term vars)
--- applySpecialise env Nothing tm
---     = findSpecs env [] tm -- not specialising, just search through RHS
--- applySpecialise env (Just ls) tmin -- specialising, evaluate RHS while looking
---                                  -- for names to specialise
---     = do defs <- get Ctxt
---          tm <- toResolvedNames tmin
---          nf <- nf defs env tm
---          tm' <- evalRHS env nf
---          tmfull <- toFullNames tm'
---          logTermNF "specialise" 5 ("New RHS") env tmfull
---          pure tmfull
+export
+applySpecialise : {vars : _} ->
+                  {auto c : Ref Ctxt Defs} ->
+                  {auto m : Ref MD Metadata} ->
+                  {auto u : Ref UST UState} ->
+                  Elaborator ->
+                  Env Term vars ->
+                  Maybe (List (Name, Nat)) ->
+                        -- ^ If we're specialising, names to reduce in the RHS
+                        -- with their reduction limits
+                  Term vars -> -- initial RHS
+                  Core (Term vars)
+applySpecialise elab env Nothing tm
+    = findSpecs elab env [] tm -- not specialising, just search through RHS
+applySpecialise elab env (Just ls) tmin -- specialising, evaluate RHS while looking
+                                 -- for names to specialise
+    = do defs <- get Ctxt
+         tm <- toResolvedNames tmin
+         nf <- nf defs env tm
+         tm' <- evalRHS elab env nf
+         tmfull <- toFullNames tm'
+         logTermNF "specialise" 5 ("New RHS") env tmfull
+         pure tmfull
