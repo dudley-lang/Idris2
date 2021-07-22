@@ -454,7 +454,7 @@ mutual
               Core (List (Term (bound ++ free)))
   quoteArgs elab q defs bounds env [] = pure []
   quoteArgs elab q defs bounds env (a :: args)
-      = pure $ (!(quoteGenNF q defs bounds env !(evalClosure defs a)) ::
+      = pure $ (!(quoteGenNF elab q defs bounds env !(evalClosure defs a)) ::
                 !(quoteArgs elab q defs bounds env args))
 
   quoteArgsWithFC : {auto c : Ref Ctxt Defs} ->
@@ -466,7 +466,7 @@ mutual
                     Env Term free -> List (FC, Closure free) ->
                     Core (List (FC, Term (bound ++ free)))
   quoteArgsWithFC elab q defs bounds env terms
-      = pure $ zip (map fst terms) !(quoteArgs q defs bounds env (map snd terms))
+      = pure $ zip (map fst terms) !(quoteArgs elab q defs bounds env (map snd terms))
 
   quoteHead : {bound, free : _} ->
               {auto c : Ref Ctxt Defs} ->
@@ -476,7 +476,7 @@ mutual
               Ref QVar Int -> Defs ->
               FC -> Bounds bound -> Env Term free -> NHead free ->
               Core (Term (bound ++ free))
-  quoteHead {bound} q defs fc bounds env (NLocal mrig _ prf)
+  quoteHead {bound} elab q defs fc bounds env (NLocal mrig _ prf)
       = let MkVar prf' = addLater bound prf in
             pure $ Local fc mrig _ prf'
     where
@@ -486,7 +486,7 @@ mutual
       addLater (x :: xs) isv
           = let MkVar isv' = addLater xs isv in
                 MkVar (Later isv')
-  quoteHead q defs fc bounds env (NRef Bound (MN n i))
+  quoteHead elab q defs fc bounds env (NRef Bound (MN n i))
       = case findName bounds of
              Just (MkVar p) => pure $ Local fc Nothing _ (varExtend p)
              Nothing => pure $ Ref fc Bound (MN n i)
@@ -502,9 +502,9 @@ mutual
       findName (Add x _ ns)
           = do MkVar p <-findName ns
                Just (MkVar (Later p))
-  quoteHead q defs fc bounds env (NRef nt n) = pure $ Ref fc nt n
-  quoteHead q defs fc bounds env (NMeta n i args)
-      = do args' <- quoteArgs q defs bounds env args
+  quoteHead elab q defs fc bounds env (NRef nt n) = pure $ Ref fc nt n
+  quoteHead elab q defs fc bounds env (NMeta n i args)
+      = do args' <- quoteArgs elab q defs bounds env args
            pure $ Meta fc n i args'
 
   quotePi : {bound, free : _} ->
@@ -526,30 +526,31 @@ mutual
                 {auto c : Ref Ctxt Defs} ->
                 {auto m : Ref MD Metadata} ->
                 {auto u : Ref UST UState} ->
+                Elaborator ->
                 Ref QVar Int -> Defs -> Bounds bound ->
                 Env Term free -> Binder (NF free) ->
                 Core (Binder (Term (bound ++ free)))
-  quoteBinder q defs bounds env (Lam fc r p ty)
+  quoteBinder elab q defs bounds env (Lam fc r p ty)
       = do ty' <- quoteGenNF elab q defs bounds env ty
-           p' <- quotePi q defs bounds env p
+           p' <- quotePi elab q defs bounds env p
            pure (Lam fc r p' ty')
-  quoteBinder q defs bounds env (Let fc r val ty)
+  quoteBinder elab q defs bounds env (Let fc r val ty)
       = do val' <- quoteGenNF elab q defs bounds env val
            ty' <- quoteGenNF elab q defs bounds env ty
            pure (Let fc r val' ty')
-  quoteBinder q defs bounds env (Pi fc r p ty)
+  quoteBinder elab q defs bounds env (Pi fc r p ty)
       = do ty' <- quoteGenNF elab q defs bounds env ty
-           p' <- quotePi q defs bounds env p
+           p' <- quotePi elab q defs bounds env p
            pure (Pi fc r p' ty')
-  quoteBinder q defs bounds env (PVar fc r p ty)
+  quoteBinder elab q defs bounds env (PVar fc r p ty)
       = do ty' <- quoteGenNF elab q defs bounds env ty
-           p' <- quotePi q defs bounds env p
+           p' <- quotePi elab q defs bounds env p
            pure (PVar fc r p' ty')
-  quoteBinder q defs bounds env (PLet fc r val ty)
+  quoteBinder elab q defs bounds env (PLet fc r val ty)
       = do val' <- quoteGenNF elab q defs bounds env val
            ty' <- quoteGenNF elab q defs bounds env ty
            pure (PLet fc r val' ty')
-  quoteBinder q defs bounds env (PVTy fc r ty)
+  quoteBinder elab q defs bounds env (PVTy fc r ty)
       = do ty' <- quoteGenNF elab q defs bounds env ty
            pure (PVTy fc r ty')
 
@@ -565,25 +566,25 @@ mutual
       = do var <- bName "qv"
            sc' <- quoteGenNF elab q defs (Add n var bound) env
                        !(sc defs (toClosure defaultOpts env (Ref fc Bound var)))
-           b' <- quoteBinder q defs bound env b
+           b' <- quoteBinder elab q defs bound env b
            pure (Bind fc n b' sc')
   -- IMPORTANT CASE HERE
   -- If fn is to be specialised, quote the args directly (no further
   -- reduction) then call specialise. Otherwise, quote as normal
   quoteGenNF elab q defs bound env (NApp fc (NRef Func fn) args)
       = do Just gdef <- lookupCtxtExact fn (gamma defs)
-                | Nothing => do args' <- quoteArgsWithFC q defs bound env args
+                | Nothing => do args' <- quoteArgsWithFC elab q defs bound env args
                                 pure $ applyWithFC (Ref fc Func fn) args'
            case specArgs gdef of
-                [] => do args' <- quoteArgsWithFC q defs bound env args
+                [] => do args' <- quoteArgsWithFC elab q defs bound env args
                          pure $ applyWithFC (Ref fc Func fn) args'
                 _ => do empty <- clearDefs defs
-                        args' <- quoteArgsWithFC q defs bound env args
-                        Just r <- specialise fc (extendEnv bound env) gdef fn args'
+                        args' <- quoteArgsWithFC elab q defs bound env args
+                        Just r <- specialise elab fc (extendEnv bound env) gdef fn args'
                              | Nothing =>
                                   -- can't specialise, keep the arguments
                                   -- unreduced
-                                  do args' <- quoteArgsWithFC q empty bound env args
+                                  do args' <- quoteArgsWithFC elab q empty bound env args
                                      pure $ applyWithFC (Ref fc Func fn) args'
                         pure r
      where
@@ -594,14 +595,14 @@ mutual
            -- a placeholder binder is fine
            = Lam fc top Explicit (Erased fc False) :: extendEnv bs env
   quoteGenNF elab q defs bound env (NApp fc f args)
-      = do f' <- quoteHead q defs fc bound env f
-           args' <- quoteArgsWithFC q defs bound env args
+      = do f' <- quoteHead elab q defs fc bound env f
+           args' <- quoteArgsWithFC elab q defs bound env args
            pure $ applyWithFC f' args'
   quoteGenNF elab q defs bound env (NDCon fc n t ar args)
-      = do args' <- quoteArgsWithFC q defs bound env args
+      = do args' <- quoteArgsWithFC elab q defs bound env args
            pure $ applyWithFC (Ref fc (DataCon t ar) n) args'
   quoteGenNF elab q defs bound env (NTCon fc n t ar args)
-      = do args' <- quoteArgsWithFC q defs bound env args
+      = do args' <- quoteArgsWithFC elab q defs bound env args
            pure $ applyWithFC (Ref fc (TyCon t ar) n) args'
   quoteGenNF elab q defs bound env (NAs fc s n pat)
       = do n' <- quoteGenNF elab q defs bound env n
@@ -623,7 +624,7 @@ mutual
           = MkClosure withHoles locs env tm
       toHolesOnly c = c
   quoteGenNF elab q defs bound env (NForce fc r arg args)
-      = do args' <- quoteArgsWithFC q defs bound env args
+      = do args' <- quoteArgsWithFC elab q defs bound env args
            case arg of
                 NDelay fc _ _ arg =>
                    do argNF <- evalClosure defs arg
